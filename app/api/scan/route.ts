@@ -3,7 +3,7 @@ import { fetchCandles } from '@/lib/data-feeds'
 import { scanAsset } from '@/lib/analysis'
 import { getAssetBySymbol, type Timeframe, type ScanResult } from '@/lib/types'
 
-export const maxDuration = 60 // Prevent timeouts for bulk assets
+export const maxDuration = 60 // Allow longer runtime for multiple assets
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -11,28 +11,34 @@ export async function GET(request: NextRequest) {
   const timeframe = (searchParams.get('timeframe') || '4h') as Timeframe
 
   if (!symbolsParam) {
-    return NextResponse.json({ error: 'Missing symbols parameter' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'Missing symbols parameter' },
+      { status: 400 }
+    )
   }
 
   const symbols = symbolsParam.split(',').map(s => s.trim()).filter(Boolean)
+  
   if (symbols.length === 0) {
-    return NextResponse.json({ error: 'No valid symbols provided' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'No valid symbols provided' },
+      { status: 400 }
+    )
   }
 
   const results: ScanResult[] = []
   const errors: string[] = []
 
-  // Process all selected assets simultaneously
+  // Process each symbol with isolated error handling
   await Promise.all(
     symbols.map(async (symbol) => {
-      const asset = getAssetBySymbol(symbol)
-      if (!asset) {
-        errors.push(`Unknown asset: ${symbol}`)
-        return
-      }
-
       try {
-        // Pulling real market data since sessions are online!
+        const asset = getAssetBySymbol(symbol)
+        if (!asset) {
+          errors.push(`Unknown asset: ${symbol}`)
+          return
+        }
+
         const candles = await fetchCandles(symbol, timeframe)
         
         if (candles.length < 200) {
@@ -43,25 +49,8 @@ export async function GET(request: NextRequest) {
         const result = scanAsset(symbol, asset.category, candles, timeframe)
         results.push(result)
       } catch (error) {
-        // --- 🛑 FAIL-SAFE OVERRIDE FOR DATA GAPS ---
-        console.log(`Live feed processing issue for ${symbol}. Injecting baseline fallback metrics.`);
-        
-        let fallbackPrice = 1.08540
-        if (asset.category === 'crypto') fallbackPrice = 67420.00
-        if (asset.category === 'metals') fallbackPrice = 2345.50
-        if (asset.category === 'indices') fallbackPrice = 18250.00
-
-        results.push({
-          symbol: symbol,
-          category: asset.category,
-          currentPrice: fallbackPrice,
-          signal: 'NEUTRAL',
-          confidence: 0,
-          ema: { trend: 'NEUTRAL', value50: fallbackPrice, value200: fallbackPrice },
-          rsi: 50.0,
-          macd: { value: 0, signal: 0, histogram: 0 },
-          timestamp: Date.now()
-        } as unknown as ScanResult)
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        errors.push(`${symbol}: ${message}`)
       }
     })
   )
