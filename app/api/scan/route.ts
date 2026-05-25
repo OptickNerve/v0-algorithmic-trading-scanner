@@ -3,7 +3,7 @@ import { fetchCandles } from '@/lib/data-feeds'
 import { scanAsset } from '@/lib/analysis'
 import { getAssetBySymbol, type Timeframe, type ScanResult } from '@/lib/types'
 
-export const maxDuration = 60 // Allow longer runtime for multiple assets
+export const maxDuration = 60 // Prevent timeouts for bulk assets
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   const results: ScanResult[] = []
   const errors: string[] = []
 
-  // Process each symbol with isolated error handling
+  // Process all selected assets simultaneously
   await Promise.all(
     symbols.map(async (symbol) => {
       const asset = getAssetBySymbol(symbol)
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       }
 
       try {
-        // Fetching real ticking market data since sessions are live!
+        // Pulling real market data since sessions are online!
         const candles = await fetchCandles(symbol, timeframe)
         
         if (candles.length < 200) {
@@ -43,7 +43,9 @@ export async function GET(request: NextRequest) {
         const result = scanAsset(symbol, asset.category, candles, timeframe)
         results.push(result)
       } catch (error) {
-        console.log(`Live feed error for ${symbol}, deploying server fallback.`);
+        // --- 🛑 FAIL-SAFE OVERRIDE FOR DATA GAPS ---
+        console.log(`Live feed processing issue for ${symbol}. Injecting baseline fallback metrics.`);
+        
         let fallbackPrice = 1.08540
         if (asset.category === 'crypto') fallbackPrice = 67420.00
         if (asset.category === 'metals') fallbackPrice = 2345.50
